@@ -173,11 +173,12 @@ def main():
         state["message"] = data.get("message")
 
     elif event == "Stop":
-        state["status"] = "waiting_for_input"
+        # Stop fires mid-task, not when truly done - don't trigger notification
+        state["status"] = "processing"
 
     elif event == "SubagentStop":
-        # SubagentStop fires when a subagent completes - usually means back to waiting
-        state["status"] = "waiting_for_input"
+        # SubagentStop fires when a subagent completes but main agent may continue
+        state["status"] = "processing"
 
     elif event == "SessionStart":
         # New session starts waiting for user input

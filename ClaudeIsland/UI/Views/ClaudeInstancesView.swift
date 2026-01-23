@@ -88,13 +88,24 @@ struct ClaudeInstancesView: View {
     // MARK: - Actions
 
     private func focusSession(_ session: SessionState) {
-        guard session.isInTmux else { return }
-
         Task {
+            // Try Yabai first (works best for tmux)
+            if session.isInTmux {
+                if let pid = session.pid {
+                    let success = await YabaiController.shared.focusWindow(forClaudePid: pid)
+                    if success { return }
+                } else {
+                    let success = await YabaiController.shared.focusWindow(forWorkingDirectory: session.cwd)
+                    if success { return }
+                }
+            }
+
+            // Fallback: find terminal parent process and activate it directly
             if let pid = session.pid {
-                _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
-            } else {
-                _ = await YabaiController.shared.focusWindow(forWorkingDirectory: session.cwd)
+                let tree = ProcessTreeBuilder.shared.buildTree()
+                if let terminalPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: pid, tree: tree) {
+                    await WindowFocuser.shared.activateTerminal(pid: terminalPid)
+                }
             }
         }
     }
@@ -278,8 +289,8 @@ struct InstanceRow: View {
         .padding(.trailing, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            onChat()
+        .onTapGesture {
+            onFocus()
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(

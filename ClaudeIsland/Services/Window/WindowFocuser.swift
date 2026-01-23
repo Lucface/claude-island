@@ -2,9 +2,10 @@
 //  WindowFocuser.swift
 //  ClaudeIsland
 //
-//  Focuses windows using yabai
+//  Focuses windows using yabai or native macOS activation
 //
 
+import AppKit
 import Foundation
 
 /// Focuses windows using yabai
@@ -40,5 +41,14 @@ actor WindowFocuser {
         }
 
         return false
+    }
+
+    /// Activate a terminal app by its process ID (fallback when Yabai unavailable)
+    @MainActor
+    func activateTerminal(pid: Int) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else {
+            return false
+        }
+        return app.activate(options: .activateIgnoringOtherApps)
     }
 }
