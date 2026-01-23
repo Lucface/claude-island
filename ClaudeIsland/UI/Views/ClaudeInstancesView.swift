@@ -101,10 +101,11 @@ struct ClaudeInstancesView: View {
             }
 
             // Fallback: find terminal parent process and activate it directly
+            // Pass cwd so we can raise the specific window matching this session
             if let pid = session.pid {
                 let tree = ProcessTreeBuilder.shared.buildTree()
                 if let terminalPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: pid, tree: tree) {
-                    await WindowFocuser.shared.activateTerminal(pid: terminalPid)
+                    await WindowFocuser.shared.activateTerminal(pid: terminalPid, cwd: session.cwd)
                 }
             }
         }
