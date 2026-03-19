@@ -499,22 +499,4 @@ struct NotchView: View {
 
         previousWaitingForInputIds = currentIds
     }
-
-    /// Determine if notification sound should play for the given sessions
-    /// Returns true if ANY session is not actively focused
-    private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
-        for session in sessions {
-            guard let pid = session.pid else {
-                // No PID means we can't check focus, assume not focused
-                return true
-            }
-
-            let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
-            if !isFocused {
-                return true
-            }
-        }
-
-        return false
-    }
 }
