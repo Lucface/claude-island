@@ -26,6 +26,7 @@ struct NotchView: View {
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
+    @State private var waitingNotificationTimers: [String: DispatchWorkItem] = [:]  // debounce timers for waitingForInput notifications
 
     @Namespace private var activityNamespace
 
@@ -416,7 +417,9 @@ struct NotchView: View {
     }
 
     private func handlePendingSessionsChange(_ sessions: [SessionState]) {
-        let currentIds = Set(sessions.map { $0.stableId })
+        // Only auto-open notch for permission requests, NOT for waitingForInput
+        let approvalSessions = sessions.filter { $0.phase.isWaitingForApproval }
+        let currentIds = Set(approvalSessions.map { $0.stableId })
         let newPendingIds = currentIds.subtracting(previousPendingIds)
 
         if !newPendingIds.isEmpty &&
@@ -433,6 +436,13 @@ struct NotchView: View {
         let waitingForInputSessions = instances.filter { $0.phase == .waitingForInput }
         let currentIds = Set(waitingForInputSessions.map { $0.stableId })
         let newWaitingIds = currentIds.subtracting(previousWaitingForInputIds)
+        let leftWaitingIds = previousWaitingForInputIds.subtracting(currentIds)
+
+        // Cancel debounce timers for sessions that left waitingForInput (went back to processing)
+        for staleId in leftWaitingIds {
+            waitingNotificationTimers[staleId]?.cancel()
+            waitingNotificationTimers.removeValue(forKey: staleId)
+        }
 
         // Track timestamps for newly waiting sessions
         let now = Date()
@@ -446,37 +456,44 @@ struct NotchView: View {
             waitingForInputTimestamps.removeValue(forKey: staleId)
         }
 
-        // Bounce the notch when a session newly enters waitingForInput state
+        // Debounce notifications: only fire if session stays in waitingForInput for 10 seconds
+        // This prevents false alerts when Claude briefly pauses between tool calls
         if !newWaitingIds.isEmpty {
-            // Get the sessions that just entered waitingForInput
             let newlyWaitingSessions = waitingForInputSessions.filter { newWaitingIds.contains($0.stableId) }
+            // Capture reference types for use in closure
+            let monitor = sessionMonitor
+            let vm = viewModel
 
-            // Play notification sound if the session is not actively focused
-            if let soundName = AppSettings.notificationSound.soundName {
-                // Check if we should play sound (async check for tmux pane focus)
-                Task {
-                    let shouldPlaySound = await shouldPlayNotificationSound(for: newlyWaitingSessions)
-                    if shouldPlaySound {
-                        await MainActor.run {
-                            NSSound(named: soundName)?.play()
-                        }
+            for session in newlyWaitingSessions {
+                let sessionId = session.stableId
+
+                // Cancel any existing timer for this session
+                waitingNotificationTimers[sessionId]?.cancel()
+
+                let workItem = DispatchWorkItem {
+                    // Re-check: is the session STILL waiting for input?
+                    let stillWaiting = monitor.instances.contains {
+                        $0.stableId == sessionId && $0.phase == .waitingForInput
+                    }
+                    guard stillWaiting else { return }
+
+                    // Now fire the notification — session has been idle for 10s
+                    if let soundName = AppSettings.notificationSound.soundName {
+                        NSSound(named: soundName)?.play()
+                    }
+
+                    // Bounce
+                    NotchActivityCoordinator.shared.showActivity(type: .claude, duration: 0.3)
+
+                    // Auto-open notch if terminal not visible
+                    if vm.status == .closed &&
+                       !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
+                        vm.notchOpen(reason: .notification)
                     }
                 }
-            }
 
-            // Trigger bounce animation to get user's attention
-            DispatchQueue.main.async {
-                isBouncing = true
-                // Bounce back after a short delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    isBouncing = false
-                }
-            }
-
-            // Schedule hiding the checkmark after 30 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [self] in
-                // Trigger a UI update to re-evaluate hasWaitingForInput
-                handleProcessingChange()
+                waitingNotificationTimers[sessionId] = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: workItem)
             }
         }
 
