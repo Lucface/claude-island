@@ -42,3 +42,8 @@ releases/
 # Xcode backup
 *.xcodeproj.backup/
 CLAUDE.md
+
+# session artifacts — keep out of public repo
+.line-navigator.md
+docs/code-review-2026-06-15/
+**/__pycache__/
